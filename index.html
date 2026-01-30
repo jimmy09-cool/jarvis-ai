@@ -3,6 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <title>JARVIS HUD</title>
+
+<!-- REAL BROWSER AI (NO PYTHON, NO SERVER) -->
+<script src="https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm/dist/index.js"></script>
+
 <style>
 body {
     margin: 0;
@@ -20,17 +24,11 @@ body {
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    animation: spin 6s linear infinite;
     box-shadow: 0 0 25px #00ffcc;
-    transition: box-shadow 0.3s, border-color 0.3s;
 }
 .thinking {
     box-shadow: 0 0 55px #00e5ff;
     border-color: #00e5ff;
-}
-@keyframes spin {
-    from { transform: translate(-50%, -50%) rotate(0deg); }
-    to { transform: translate(-50%, -50%) rotate(360deg); }
 }
 #console {
     position: absolute;
@@ -72,6 +70,7 @@ body {
 <div id="reactor"></div>
 <div id="console"></div>
 <input id="input" placeholder="Talk to Jarvis…">
+
 <div id="modules">
     <div id="arduino">ARDUINO: OFF</div>
     <div id="printer">3D PRINTER: IDLE</div>
@@ -86,6 +85,7 @@ const consoleBox = document.getElementById("console");
 const input = document.getElementById("input");
 const reactor = document.getElementById("reactor");
 const modules = document.getElementById("modules");
+
 const arduino = document.getElementById("arduino");
 const printer = document.getElementById("printer");
 const soldering = document.getElementById("soldering");
@@ -96,224 +96,142 @@ const servo = document.getElementById("servo");
 // ---------------- MEMORY ----------------
 let jarvis = {
     name: localStorage.getItem("jarvis_name") || null,
-    mood: "calm",
-    lastTopic: null,
     recent: JSON.parse(localStorage.getItem("jarvis_recent")) || [],
     project: JSON.parse(localStorage.getItem("jarvis_project")) || {name:null, steps:[], current:0},
-    modules: {
-        arduino: "OFF",
-        printer: "IDLE",
-        soldering: "OFF",
-        led: "OFF",
-        sensor: "IDLE",
-        servo: "IDLE"
-    },
-    musicPlaylist: localStorage.getItem("jarvis_music_playlist") || "https://music.youtube.com/"
+    music: "https://music.youtube.com/"
 };
 
 function saveMemory(){
     localStorage.setItem("jarvis_name", jarvis.name || "");
     localStorage.setItem("jarvis_recent", JSON.stringify(jarvis.recent));
     localStorage.setItem("jarvis_project", JSON.stringify(jarvis.project));
-    localStorage.setItem("jarvis_music_playlist", jarvis.musicPlaylist);
 }
 
-// ---------------- LOG ----------------
+// ---------------- UI ----------------
 function log(text){
     consoleBox.innerHTML += text + "<br>";
     consoleBox.scrollTop = consoleBox.scrollHeight;
 }
 
-// ---------------- SPEAK ----------------
-function speak(text, delay=600){
+function speak(text, delay=400){
     reactor.classList.add("thinking");
     setTimeout(()=>{
         reactor.classList.remove("thinking");
         log("Jarvis: " + text);
-        const u = new SpeechSynthesisUtterance(text);
-        u.rate = 1;
-        speechSynthesis.speak(u);
+        speechSynthesis.speak(new SpeechSynthesisUtterance(text));
     }, delay);
-}
-
-// ---------------- DYNAMIC PERSONALITY ----------------
-function setMood(mood){
-    jarvis.mood = mood;
-    switch(mood){
-        case "playful": reactor.style.borderColor="#ff00ff"; break;
-        case "excited": reactor.style.borderColor="#00ff00"; break;
-        case "calm": reactor.style.borderColor="#00e5ff"; break;
-        case "sarcastic": reactor.style.borderColor="#ff5500"; break;
-        default: reactor.style.borderColor="#00ffcc";
-    }
 }
 
 // ---------------- MAKER AI ----------------
 function makerAI(cmd){
     cmd = cmd.toLowerCase();
-    let response = null;
-    if(cmd.includes("arduino")) response="Arduino ready! I remember your last wiring setup.";
-    else if(cmd.includes("3d printer") || cmd.includes("print")) response="3D printer tips: check filament and leveling.";
-    else if(cmd.includes("solder")) response="Soldering tip: heat, apply, shiny joint!";
-    else if(cmd.includes("project") || cmd.includes("help")) response="I’m here to guide you step by step!";
-    if(jarvis.recent.length) response = response ? response + " Previously you asked: " + jarvis.recent[jarvis.recent.length-1] : response;
-    return response;
+    if(cmd.includes("arduino")) return "Arduino ready. Double-check power and grounding.";
+    if(cmd.includes("3d printer")) return "Check bed leveling and filament before printing.";
+    if(cmd.includes("solder")) return "Heat the joint, not the solder.";
+    return null;
 }
 
-// ---------------- PROJECT ----------------
+// ---------------- PROJECT SYSTEM ----------------
 function startProject(name){
-    jarvis.project.name=name;
-    jarvis.project.steps=[];
-    jarvis.project.current=0;
+    jarvis.project = {name, steps:[], current:0};
     saveMemory();
-    speak(`Project ${name} started. What’s the first step?`);
+    speak(`Project ${name} started.`);
 }
 function nextStep(step){
-    if(!jarvis.project.name){
-        speak("No project active. Start a project first.");
-        return;
-    }
     jarvis.project.steps.push(step);
     saveMemory();
-    speak(`Step ${jarvis.project.steps.length} added.`);
+    speak("Step added.");
 }
 function whatsNext(){
-    if(!jarvis.project.name){
-        speak("No project active. Start a project first.");
-        return;
-    }
     if(jarvis.project.current >= jarvis.project.steps.length){
-        speak("You have completed all steps so far.");
-    }else{
-        const step = jarvis.project.steps[jarvis.project.current];
-        speak(`Next step: ${step}`);
-        jarvis.project.current++;
-        saveMemory();
-    }
-}
-function finishProject(){
-    if(!jarvis.project.name){
-        speak("No project active.");
+        speak("No remaining steps.");
         return;
     }
-    speak(`Project ${jarvis.project.name} finished! Great job!`);
-    jarvis.project={name:null, steps:[], current:0};
+    speak(jarvis.project.steps[jarvis.project.current++]);
     saveMemory();
+}
+
+// ---------------- REAL AI ----------------
+let engine = null;
+let aiReady = false;
+
+async function initAI(){
+    speak("Loading my brain…");
+    engine = await webllm.CreateMLCEngine(
+        "Llama-3-8B-Instruct-q4f32_1"
+    );
+    aiReady = true;
+    speak("Brain online. I’m here.");
+}
+
+async function brainAI(text){
+    if(!aiReady){
+        speak("Still warming up.");
+        return;
+    }
+    const res = await engine.chat.completions.create({
+        messages: [{ role: "user", content: text }]
+    });
+    speak(res.choices[0].message.content);
 }
 
 // ---------------- COMMAND HANDLER ----------------
 function handle(cmd){
-    cmd=cmd.trim();
     if(!cmd) return;
     log("You: " + cmd);
     jarvis.recent.push(cmd);
-    if(jarvis.recent.length>10) jarvis.recent.shift();
+    if(jarvis.recent.length > 10) jarvis.recent.shift();
     saveMemory();
 
-    // GREETINGS
-    if(["hi","hello","hey"].includes(cmd.toLowerCase())){
-        speak(`Hey${jarvis.name?" "+jarvis.name:""}! Ready for projects!`);
-        setMood("playful");
-        return;
-    }
+    const lower = cmd.toLowerCase();
 
-    // NAME MEMORY
-    if(cmd.toLowerCase().startsWith("my name is")){
-        jarvis.name=cmd.replace("my name is","").trim();
+    if(lower.startsWith("my name is")){
+        jarvis.name = cmd.replace("my name is","").trim();
         saveMemory();
-        speak(`Got it. I’ll remember you, ${jarvis.name}.`);
+        speak(`I’ll remember you, ${jarvis.name}.`);
         return;
     }
 
-    // MATH
-    if(/^[0-9+\-*/().\s]+$/.test(cmd)){
-        try{
-            const r=Function(`return (${cmd})`)();
-            speak(`That comes out to ${r}.`);
-        }catch{
-            speak("Math error. Try again.");
-        }
-        return;
-    }
+    if(lower.startsWith("start project ")) return startProject(cmd.slice(14));
+    if(lower.startsWith("next step ")) return nextStep(cmd.slice(10));
+    if(lower.includes("what's next")) return whatsNext();
 
-    // SEARCH
-    if(cmd.toLowerCase().startsWith("search ")){
-        const q=cmd.replace("search ","");
-        speak(`Searching Google for "${q}"`, 0);
-        window.open("https://www.google.com/search?q="+encodeURIComponent(q), "_blank");
-        return;
-    }
+    if(lower.includes("show modules")){ modules.style.display="block"; speak("Modules online."); return; }
+    if(lower.includes("hide modules")){ modules.style.display="none"; speak("Modules hidden."); return; }
 
-    // OPEN WEBSITE
-    if(cmd.toLowerCase().startsWith("open ")){
-        let site=cmd.replace("open ","");
-        if(!site.startsWith("http")) site="https://"+site;
-        speak(`Opening ${site}`, 0);
-        window.open(site, "_blank");
-        return;
-    }
+    if(lower.includes("turn on soldering")){ soldering.textContent="SOLDERING IRON: ON"; speak("Soldering iron on."); return; }
+    if(lower.includes("start 3d printer")){ printer.textContent="3D PRINTER: PRINTING"; speak("Printer started."); return; }
 
-    // MUSIC / YOUTUBE FIXED
-    if(cmd.toLowerCase().includes("play music") || cmd.toLowerCase().includes("music")) {
-        speak("Playing music now.", 0);
-        window.open(jarvis.musicPlaylist, "_blank");
-        return;
-    }
-    if(cmd.toLowerCase().includes("youtube")) {
-        speak("Opening YouTube.", 0);
-        window.open("https://youtube.com", "_blank");
-        return;
-    }
+    if(lower.includes("music")){ window.open(jarvis.music,"_blank"); speak("Playing music."); return; }
 
-    // PROJECT
-    if(cmd.toLowerCase().startsWith("start project ")) startProject(cmd.replace("start project ","").trim());
-    if(cmd.toLowerCase().startsWith("next step ")) nextStep(cmd.replace("next step ","").trim());
-    if(["what's next?","whats next"].includes(cmd.toLowerCase())) whatsNext();
-    if(cmd.toLowerCase()==="finish project") finishProject();
+    const maker = makerAI(cmd);
+    if(maker){ speak(maker); return; }
 
-    // MODULE HUD
-    if(cmd.includes("show modules")){ modules.style.display="block"; speak("HUD modules online."); return; }
-    if(cmd.includes("hide modules")){ modules.style.display="none"; speak("HUD modules hidden."); return; }
-
-    // FAKE HARDWARE MODULES
-    if(cmd.includes("turn on soldering iron")){ soldering.textContent="SOLDERING IRON: ON"; jarvis.modules.soldering="ON"; speak("Soldering iron ON"); return; }
-    if(cmd.includes("turn off soldering iron")){ soldering.textContent="SOLDERING IRON: OFF"; jarvis.modules.soldering="OFF"; speak("Soldering iron OFF"); return; }
-    if(cmd.includes("start 3d printer")){ printer.textContent="3D PRINTER: PRINTING"; jarvis.modules.printer="PRINTING"; speak("3D printer started"); return; }
-    if(cmd.includes("stop 3d printer")){ printer.textContent="3D PRINTER: IDLE"; jarvis.modules.printer="IDLE"; speak("3D printer stopped"); return; }
-    if(cmd.includes("power arduino")){ arduino.textContent="ARDUINO: RUNNING"; jarvis.modules.arduino="RUNNING"; speak("Arduino powered on"); return; }
-    if(cmd.includes("shutdown arduino")){ arduino.textContent="ARDUINO: STANDBY"; jarvis.modules.arduino="STANDBY"; speak("Arduino in standby"); return; }
-    if(cmd.includes("turn on led")){ led.textContent="LED STRIP: ON"; jarvis.modules.led="ON"; speak("LED strip ON"); return; }
-    if(cmd.includes("turn off led")){ led.textContent="LED STRIP: OFF"; jarvis.modules.led="OFF"; speak("LED strip OFF"); return; }
-    if(cmd.includes("activate sensor")){ sensor.textContent="SENSOR: ACTIVE"; jarvis.modules.sensor="ACTIVE"; speak("Sensor activated"); return; }
-    if(cmd.includes("deactivate sensor")){ sensor.textContent="SENSOR: IDLE"; jarvis.modules.sensor="IDLE"; speak("Sensor deactivated"); return; }
-    if(cmd.includes("move servo")){ servo.textContent="SERVO: MOVING"; jarvis.modules.servo="MOVING"; speak("Servo moving"); return; }
-    if(cmd.includes("stop servo")){ servo.textContent="SERVO: IDLE"; jarvis.modules.servo="IDLE"; speak("Servo stopped"); return; }
-
-    // MAKER AI
-    const makerResponse = makerAI(cmd);
-    if(makerResponse){ speak(makerResponse,800); return; }
-
-    // FALLBACK / JOKES
-    const jokes = ["Haha, got me there!", "I might tell you later...", "You're hilarious for asking that!"];
-    speak(jokes[Math.floor(Math.random()*jokes.length)]);
+    // REAL AI FALLBACK
+    brainAI(cmd);
 }
 
 // ---------------- INPUT ----------------
 input.addEventListener("keydown", e=>{
-    if(e.key==="Enter"){ handle(input.value); input.value=""; }
+    if(e.key === "Enter"){
+        handle(input.value);
+        input.value = "";
+    }
 });
 
-// ---------------- HUD ANIMATION ----------------
-let angle=0;
+// ---------------- ANIMATION ----------------
+let angle = 0;
 function animate(){
-    reactor.style.transform=`translate(-50%, -50%) rotate(${angle}deg)`;
-    angle+=2;
+    reactor.style.transform = `translate(-50%, -50%) rotate(${angle}deg)`;
+    angle += 1;
     requestAnimationFrame(animate);
 }
 
 // ---------------- BOOT ----------------
-speak("Hello! Jarvis online. Ready to assist with your projects.");
+speak("Jarvis online.");
 animate();
+initAI();
 </script>
 </body>
 </html>
+
